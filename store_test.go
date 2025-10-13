@@ -21,50 +21,70 @@ func TestPathTransformFunc(t *testing.T) {
 	}
 }
 
-func TestStoreDeleteKey(t *testing.T) {
-	opts := StoreOpts{
-		PathTransformFunc: CASPathTransformFunc,
-	}
-	s := NewStore(opts)
-	key := "momsspecials"
-	data := []byte("some jpg bytes")
+// func TestStoreDeleteKey(t *testing.T) {
+// 	opts := StoreOpts{
+// 		PathTransformFunc: CASPathTransformFunc,
+// 	}
+// 	s := NewStore(opts)
+// 	key := "momsspecials"
+// 	data := []byte("some jpg bytes")
 
-	if err := s.writeStream(key, bytes.NewReader(data)); err != nil {
-		t.Error(err)
-	}
+// 	if err := s.writeStream(key, bytes.NewReader(data)); err != nil {
+// 		t.Error(err)
+// 	}
 
-	if err := s.Delete(key); err != nil {
-		t.Error(err)
+// 	if err := s.Delete(key); err != nil {
+// 		t.Error(err)
+// 	}
+// }
+
+func TestStore(t *testing.T) {
+	s := newStore()
+	defer tearDown(t, s)
+	for i := 0; i < 50; i++ {
+
+		key := fmt.Sprintf("foo_%d", i)
+		data := []byte("some jpg bytes")
+
+		if err := s.writeStream(key, bytes.NewReader(data)); err != nil {
+			t.Error(err)
+		}
+
+		if ok := s.Has(key); !ok {
+			t.Errorf("expexted to have key %s", key)
+		}
+
+		r, err := s.Read(key)
+		if err != nil {
+			t.Error(err)
+		}
+
+		b, _ := io.ReadAll(r)
+
+		fmt.Println(string(b))
+
+		if string(b) != string(data) {
+			t.Errorf("want %s have %s", data, b)
+		}
+		if err := s.Delete(key); err != nil {
+			t.Error(err)
+		}
+
+		if ok := s.Has(key); ok {
+			t.Errorf("expexted to Not have key %s", key)
+		}
 	}
 }
 
-func TestStore(t *testing.T) {
+func newStore() *Store {
 	opts := StoreOpts{
 		PathTransformFunc: CASPathTransformFunc,
 	}
-	s := NewStore(opts)
-	key := "momsspecials"
-	data := []byte("some jpg bytes")
+	return NewStore(opts)
+}
 
-	if err := s.writeStream("momsspecials", bytes.NewReader(data)); err != nil {
+func tearDown(t *testing.T, s *Store) {
+	if err := s.Clear(); err != nil {
 		t.Error(err)
 	}
-
-	if ok := s.Has(key); !ok {
-		t.Errorf("expexted to have key %s", key)
-	}
-
-	r, err := s.Read(key)
-	if err != nil {
-		t.Error(err)
-	}
-
-	b, _ := io.ReadAll(r)
-
-	fmt.Println(string(b))
-
-	if string(b) != string(data) {
-		t.Errorf("want %s have %s", data, b)
-	}
-	s.Delete(key)
 }

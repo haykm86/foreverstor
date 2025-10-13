@@ -1,38 +1,40 @@
 package main
 
 import (
-	"fmt"
 	"log"
 
 	"github.com/haykm86/foreverstor/p2p"
 )
 
-func OnPeer(p2p.Peer) error {
-	fmt.Println("doing some logic with the peer outside the tcp transport")
-	return nil
+func makeServer(listenAddr string, nodes ...string) *FileServer {
+	tcpTransportOpts := p2p.TCPTransportOpts{
+		ListenAddr:    listenAddr,
+		HandshakeFunc: p2p.NOPHandshakeFunc,
+		Decoder:       p2p.DefaultDecoder{},
+		// TODO onPeer func
+	}
+
+	tcpTransport := p2p.NewTCPTransport(tcpTransportOpts)
+
+	fileServerOpts := FileServerOpts{
+		StorageRoot:       listenAddr + "_network",
+		PathTransformFunc: CASPathTransformFunc,
+		Transport:         tcpTransport,
+		BootstrapNodes:    nodes,
+	}
+
+	s := NewFileServer(fileServerOpts)
+	tcpTransport.OnPeer = s.OnPeer
+	return s
 }
 
 func main() {
-	tcpOpts := p2p.TCPTransportOps{
-		ListenAddr:    ":44040",
-		HandshakeFunc: p2p.NOPHandshakeFunc,
-		Decoder:       p2p.DefaultDecoder{},
-		OnPeer:        OnPeer,
-	}
-
-	tr := p2p.NewTCPTransport(tcpOpts)
+	s1 := makeServer(":44044", "")
+	s2 := makeServer(":33033", ":44044")
 
 	go func() {
-		for {
-			msg := <-tr.Consume()
-			fmt.Printf("Messag: %+v\n", msg)
-			//fmt.Printf("Message:%v\n", string(msg.Payload))
-		}
+		log.Fatal(s1.Start())
 	}()
 
-	if err := tr.ListenAndAccept(); err != nil {
-		log.Fatal(err)
-	}
-
-	select {}
+	s2.Start()
 }
