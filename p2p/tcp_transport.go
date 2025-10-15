@@ -4,15 +4,27 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 )
 
 // TCPPeer represents the remote node ocer a TCP established connection
 type TCPPeer struct {
-	// conn is the underlying connection of the peer
-	conn net.Conn
+	// The underlying connection of the peer. Which in this case
+	// is a TCP connection.
+	net.Conn
 	// if we dial and retrive a conn => oubound == true
 	// if we accept and retrive a conn => oubound == false
 	outbound bool
+
+	wg *sync.WaitGroup
+}
+
+func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
+	return &TCPPeer{
+		Conn:     conn,
+		outbound: outbound,
+		wg:       &sync.WaitGroup{},
+	}
 }
 
 type TCPTransportOpts struct {
@@ -28,32 +40,23 @@ type TCPTransport struct {
 	rpcch    chan RPC
 }
 
-func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
-	return &TCPPeer{
-		conn:     conn,
-		outbound: outbound,
-	}
-}
-
 func (p *TCPPeer) Send(b []byte) error {
-	_, err := p.conn.Write(b)
+	_, err := p.Conn.Write(b)
 	return err
 }
 
-// RemoteAddr implements the Peer interface and will return the
-// remote address of its underlying connection.
-func (p *TCPPeer) RemoteAddr() net.Addr {
-	return p.conn.RemoteAddr()
+func (t *TCPTransport) Addr() string {
+	return t.ListenAddr
+}
+
+func (p *TCPPeer) CloseStream() {
+	p.wg.Done()
 }
 
 // Consume implements the Transport interface, wich will return read-only channel
 // for reading the incoming messages received from another peer.
 func (t *TCPTransport) Consume() <-chan RPC {
 	return t.rpcch
-}
-
-func (p *TCPPeer) Close() error {
-	return p.conn.Close()
 }
 
 // Dial implements the Transport interface.
@@ -70,7 +73,7 @@ func (t *TCPTransport) Dial(addr string) error {
 func NewTCPTransport(ops TCPTransportOpts) *TCPTransport {
 	return &TCPTransport{
 		TCPTransportOpts: ops,
-		rpcch:            make(chan RPC),
+		rpcch:            make(chan RPC, 1024),
 	}
 }
 
@@ -131,20 +134,25 @@ func (t *TCPTransport) handleConn(conn net.Conn, outBound bool) {
 	}
 
 	// Read Loop
-	rpc := RPC{}
 	for {
-		if err := t.Decoder.Decode(conn, &rpc); err != nil {
-			if err == net.ErrClosed {
-				// remote closed cleanly; stop handling this connection
-				return
-			}
+		rpc := RPC{}
+		err := t.Decoder.Decode(conn, &rpc)
+		if err != nil {
+			fmt.Println("Tis is for 1 bite message:", err)
+			return
+		}
 
-			fmt.Printf("TCP error: %s\n", err)
+		rpc.From = conn.RemoteAddr().String()
+		if rpc.Stream {
+
+			peer.wg.Add(1)
+			fmt.Printf("[%s] incoming stream, waiting...\n", conn.RemoteAddr())
+
+			peer.wg.Wait()
+			fmt.Printf("[%s] stream closed, resuming read loop\n", conn.RemoteAddr())
 			continue
 		}
-		// TODO: handle decoded message
-		// fmt.Printf("message: %v from:%v\n ", string(rpc.Payload), rpc.From)
-		rpc.From = conn.RemoteAddr()
+
 		t.rpcch <- rpc
 	}
 }
